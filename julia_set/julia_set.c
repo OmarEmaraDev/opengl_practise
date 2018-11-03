@@ -7,13 +7,12 @@
 #include <GLFW/glfw3.h>
 
 GLchar* readShaderSource(char* path) {
-    GLchar* buffer = 0;
     long length;
     FILE* f = fopen(path, "r");
     fseek(f, 0, SEEK_END);
     length = ftell(f);
     fseek(f, 0, SEEK_SET);
-    buffer = malloc(length + 1);
+    GLchar* buffer = malloc(length + 1);
     fread(buffer, 1, length, f);
     fclose (f);
     buffer[length] = '\0';
