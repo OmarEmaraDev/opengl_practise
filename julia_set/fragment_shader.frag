@@ -1,5 +1,4 @@
 #version 140
-uniform float time;
 uniform vec2 mousePos;
 in vec2 pos;
 out vec4 outColor;

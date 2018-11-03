@@ -69,14 +69,12 @@ int main(void)
     glEnableVertexAttribArray(posAttrib);
     glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
-    GLint time = glGetUniformLocation(shaderProgram, "time");
     double mousePosX, mousePosY;
     GLint mousePos = glGetUniformLocation(shaderProgram, "mousePos");
 
     while (!glfwWindowShouldClose(window))
     {
         glClear(GL_COLOR_BUFFER_BIT);
-        glUniform1f(time, glfwGetTime());
         glfwGetCursorPos(window, &mousePosX, &mousePosY);
         glUniform2f(mousePos, (float) mousePosX / 256 - 1, (float) mousePosY / 128 - 1);
 
