@@ -12,54 +12,89 @@
 
 GLchar* readShaderSource(char* path);
 
-GLuint chargeCount = 0;
-GLfloat chargePositions[MAXCOUNT * 2];
-
-GLFWcursor* crossCursor;
-GLFWcursor* regularCursor;
+typedef struct {
+    unsigned int count;
+    GLfloat positions[MAXCOUNT * 2];
+} Charges;
+Charges charges = {.count = 0};
 
 typedef struct {
     double x;
     double y;
-} mousePos;
-mousePos mPos;
+} Point;
 
-static void mousePosToDeviceCooridinates() {
-    mPos.x = (mPos.x / WIDTH - 0.5) * 2;
-    mPos.y = - (mPos.y / HEIGHT - 0.5) * 2;
+typedef struct {
+    char selected;
+    int index;
+    Point offset;
+} Selection;
+Selection selection;
+
+typedef struct {
+    Point location;
+    int nearestCharge;
+    int isAroundCharge;
+    GLFWcursor* cross;
+    GLFWcursor* regular;
+} Cursor;
+Cursor cursor;
+
+static void cursorPosToDeviceCooridinates() {
+    cursor.location.x = (cursor.location.x / WIDTH - 0.5) * 2;
+    cursor.location.y = - (cursor.location.y / HEIGHT - 0.5) * 2;
 }
 
-char isNearAny(double x, double y) {
-    if (chargeCount == 0) return 0;
-    char isNearAny = 0;
-    for (size_t i = 0; i < chargeCount; i++) {
-        double x2 = chargePositions[i * 2];
-        double y2 = chargePositions[i * 2 + 1];
-        if ((x - x2) * (x - x2) + (y - y2) * (y - y2) < THRESHOLD * THRESHOLD){
-            isNearAny = 1;
+int nearestCharge(double x, double y) {
+    int chargeIndex = 0;
+    double leastDistanceSquared = 4;
+    double x2, y2, distanceSquared;
+    for (size_t i = 0; i < charges.count; i++) {
+        x2 = charges.positions[i * 2];
+        y2 = charges.positions[i * 2 + 1];
+        distanceSquared = (x - x2) * (x - x2) + (y - y2) * (y - y2);
+        if ( distanceSquared < leastDistanceSquared){
+            leastDistanceSquared = distanceSquared;
+            chargeIndex = i;
         }
     }
-    return isNearAny;
+    return chargeIndex;
+}
+
+char isAroundCharge(int index) {
+    double dx = cursor.location.x - charges.positions[index * 2];
+    double dy = cursor.location.y - charges.positions[index * 2 + 1];
+    return dx * dx + dy * dy < THRESHOLD * THRESHOLD;
 }
 
 static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-    if (button != GLFW_MOUSE_BUTTON_LEFT) return;
     if (action == GLFW_PRESS) {
-        glfwGetCursorPos(window, &mPos.x, &mPos.y);
-        mousePosToDeviceCooridinates();
-        if (!isNearAny(mPos.x, mPos.y)) {
-            chargePositions[chargeCount * 2] = mPos.x;
-            chargePositions[chargeCount * 2 + 1] = mPos.y;
-            chargeCount++;
+        if (!cursor.isAroundCharge) {
+            charges.positions[charges.count * 2] = cursor.location.x;
+            charges.positions[charges.count * 2 + 1] = cursor.location.y;
+            charges.count++;
+        } else {
+            selection.selected = 1;
+            selection.index = cursor.nearestCharge;
+            selection.offset.x = cursor.location.x - charges.positions[cursor.nearestCharge * 2];
+            selection.offset.y = cursor.location.y - charges.positions[cursor.nearestCharge * 2 + 1];
         }
+    } else {
+        selection.selected = 0;
     }
 }
 
 static void cursorPositionCallback(GLFWwindow* window, double xPos, double yPos)
 {
-    mPos.x = xPos; mPos.y = yPos;
-    mousePosToDeviceCooridinates();
-    glfwSetCursor(window, isNearAny(mPos.x, mPos.y) ? crossCursor : regularCursor);
+    cursor.location.x = xPos;
+    cursor.location.y = yPos;
+    cursorPosToDeviceCooridinates();
+    cursor.nearestCharge = nearestCharge(cursor.location.x, cursor.location.y);
+    cursor.isAroundCharge = isAroundCharge(cursor.nearestCharge);
+    glfwSetCursor(window, cursor.isAroundCharge ? cursor.cross : cursor.regular);
+    if (selection.selected) {
+        charges.positions[selection.index * 2] = cursor.location.x - selection.offset.x;
+        charges.positions[selection.index * 2 + 1] = cursor.location.y - selection.offset.y;
+    }
 }
 
 typedef struct {
@@ -68,8 +103,8 @@ typedef struct {
     GLuint shaderProgram;
     GLuint vbo;
     GLuint ibo;
-} potentialField;
-potentialField field;
+} PotentialField;
+PotentialField field;
 
 void preparePotentialField() {
     GLuint vbo;
@@ -125,8 +160,8 @@ void preparePotentialField() {
 
 void drawPotentialField() {
     glUseProgram(field.shaderProgram);
-    glUniform2fv(field.chargesLocation, chargeCount, chargePositions);
-    glUniform1i(field.chargeCountLocation, chargeCount);
+    glUniform2fv(field.chargesLocation, charges.count, charges.positions);
+    glUniform1i(field.chargeCountLocation, charges.count);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 }
 
@@ -139,8 +174,8 @@ int main(void)
     glewInit();
 
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
-    crossCursor = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
-    regularCursor = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
+    cursor.cross = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
+    cursor.regular = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
     glfwSetCursorPosCallback(window, cursorPositionCallback);
 
     preparePotentialField();
