@@ -2,7 +2,7 @@
 #define WIDTH 512
 #define HEIGHT 512
 #define MAXCOUNT 10
-#define THRESHOLD 0.1
+#define RADIUS 0.1
 
 #include <math.h>
 #include <stdio.h>
@@ -61,9 +61,10 @@ int nearestCharge(double x, double y) {
 }
 
 char isAroundCharge(int index) {
+    if (charges.count == 0) return 0;
     double dx = cursor.location.x - charges.positions[index * 2];
     double dy = cursor.location.y - charges.positions[index * 2 + 1];
-    return dx * dx + dy * dy < THRESHOLD * THRESHOLD;
+    return dx * dx + dy * dy < RADIUS * RADIUS;
 }
 
 static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
@@ -98,15 +99,13 @@ static void cursorPositionCallback(GLFWwindow* window, double xPos, double yPos)
 }
 
 typedef struct {
-    GLuint chargesLocation;
-    GLuint chargeCountLocation;
-    GLuint shaderProgram;
     GLuint vbo;
     GLuint ibo;
-} PotentialField;
-PotentialField field;
+    GLuint vertexShader;
+} Quad;
+Quad quad;
 
-void preparePotentialField() {
+void prepareQuad() {
     GLuint vbo;
     glGenBuffers(1, &vbo);
     GLfloat vertices[] = {
@@ -117,7 +116,7 @@ void preparePotentialField() {
     };
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    field.vbo = vbo;
+    quad.vbo = vbo;
 
     GLuint ibo;
     glGenBuffers(1, &ibo);
@@ -127,42 +126,68 @@ void preparePotentialField() {
     };
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-    field.ibo = ibo;
+    quad.ibo = ibo;
 
     const GLchar* vertexSource = readShaderSource("vertex_shader.vert");
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexSource, NULL);
     glCompileShader(vertexShader);
     free((void*)vertexSource);
+    quad.vertexShader = vertexShader;
 
-    const GLchar* fragmentSource = readShaderSource("potential_field_fragmenet_shader.frag");
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+}
+
+GLuint fieldProgram;
+void prepareFieldProgram() {
+    const GLchar* fragmentSource = readShaderSource("potential_field.frag");
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
     glCompileShader(fragmentShader);
     free((void*)fragmentSource);
 
     GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, quad.vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
-    field.shaderProgram = shaderProgram;
+    fieldProgram = shaderProgram;
 
     glDeleteShader(fragmentShader);
-    glDeleteShader(vertexShader);
-
-    GLint posAttrib = glGetAttribLocation(shaderProgram, "position");
-    glEnableVertexAttribArray(posAttrib);
-    glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-    field.chargesLocation = glGetUniformLocation(shaderProgram, "charges");
-    field.chargeCountLocation = glGetUniformLocation(shaderProgram, "chargeCount");
 }
 
 void drawPotentialField() {
-    glUseProgram(field.shaderProgram);
-    glUniform2fv(field.chargesLocation, charges.count, charges.positions);
-    glUniform1i(field.chargeCountLocation, charges.count);
+    glUseProgram(fieldProgram);
+    glUniform4f(glGetUniformLocation(fieldProgram, "transformation"), 1, 1, 0, 0);
+    glUniform2fv(glGetUniformLocation(fieldProgram, "charges"), charges.count, charges.positions);
+    glUniform1i(glGetUniformLocation(fieldProgram, "chargeCount"), charges.count);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+}
+
+GLuint chargeProgram;
+void prepareChargeProgram() {
+    const GLchar* fragmentSource = readShaderSource("charge.frag");
+    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
+    glCompileShader(fragmentShader);
+    free((void*)fragmentSource);
+
+    GLuint shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, quad.vertexShader);
+    glAttachShader(shaderProgram, fragmentShader);
+    glLinkProgram(shaderProgram);
+    chargeProgram = shaderProgram;
+
+    glDeleteShader(fragmentShader);
+}
+
+void drawCharges() {
+    glUseProgram(chargeProgram);
+    GLuint unfiromLocation = glGetUniformLocation(chargeProgram, "transformation");
+    for (size_t i = 0; i < charges.count; i++) {
+        glUniform4f(unfiromLocation, RADIUS, RADIUS, charges.positions[i * 2], charges.positions[i * 2 + 1]);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    }
 }
 
 int main(void)
@@ -178,21 +203,28 @@ int main(void)
     cursor.regular = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
     glfwSetCursorPosCallback(window, cursorPositionCallback);
 
-    preparePotentialField();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    prepareQuad();
+    prepareFieldProgram();
+    prepareChargeProgram();
 
     while (!glfwWindowShouldClose(window))
     {
         glClear(GL_COLOR_BUFFER_BIT);
 
         drawPotentialField();
+        drawCharges();
 
         glfwSwapBuffers(window);
         glfwWaitEvents();
     }
 
-    glDeleteProgram(field.shaderProgram);
-    glDeleteBuffers(1, &field.vbo);
-    glDeleteBuffers(1, &field.ibo);
+    glDeleteShader(quad.vertexShader);
+    glDeleteProgram(fieldProgram);
+    glDeleteBuffers(1, &quad.vbo);
+    glDeleteBuffers(1, &quad.ibo);
 
     glfwTerminate();
     return 0;

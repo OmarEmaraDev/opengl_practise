@@ -10,6 +10,6 @@ void main()
     {
         p += 1 / distance(pos, charges[i]);
     }
-    p /= 25;
+    p /= 15;
     outColor = vec4(p, p, p, 1);
 }
