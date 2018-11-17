@@ -103,44 +103,45 @@ typedef struct {
     GLuint ibo;
     GLuint vertexShader;
 } Quad;
-Quad quad;
 
-void prepareQuad() {
-    GLuint vbo;
-    glGenBuffers(1, &vbo);
+Quad prepareQuad() {
+    Quad quad;
+    glGenBuffers(1, &quad.vbo);
     GLfloat vertices[] = {
         -1.,  1.,
          1.,  1.,
          1., -1.,
         -1., -1.
     };
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, quad.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    quad.vbo = vbo;
 
-    GLuint ibo;
-    glGenBuffers(1, &ibo);
+    glGenBuffers(1, &quad.ibo);
     GLuint indices[] = {
         0, 1, 2,
         2, 3, 0
     };
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quad.ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-    quad.ibo = ibo;
 
     const GLchar* vertexSource = readShaderSource("vertex_shader.vert");
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexSource, NULL);
-    glCompileShader(vertexShader);
+    quad.vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(quad.vertexShader, 1, &vertexSource, NULL);
+    glCompileShader(quad.vertexShader);
     free((void*)vertexSource);
-    quad.vertexShader = vertexShader;
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    return quad;
 }
 
-GLuint fieldProgram;
-void prepareFieldProgram() {
+void deleteQuad(Quad* quad) {
+    glDeleteBuffers(1, &quad->vbo);
+    glDeleteBuffers(1, &quad->ibo);
+    glDeleteShader(quad->vertexShader);
+}
+
+GLuint prepareFieldProgram(Quad* quad) {
     const GLchar* fragmentSource = readShaderSource("potential_field.frag");
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
@@ -148,15 +149,15 @@ void prepareFieldProgram() {
     free((void*)fragmentSource);
 
     GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, quad.vertexShader);
+    glAttachShader(shaderProgram, quad->vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
-    fieldProgram = shaderProgram;
 
     glDeleteShader(fragmentShader);
+    return shaderProgram;
 }
 
-void drawPotentialField() {
+void drawPotentialField(GLuint fieldProgram) {
     glUseProgram(fieldProgram);
     glUniform4f(glGetUniformLocation(fieldProgram, "transformation"), 1, 1, 0, 0);
     glUniform2fv(glGetUniformLocation(fieldProgram, "charges"), charges.count, charges.positions);
@@ -164,8 +165,7 @@ void drawPotentialField() {
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 }
 
-GLuint chargeProgram;
-void prepareChargeProgram() {
+GLuint prepareChargeProgram(Quad* quad) {
     const GLchar* fragmentSource = readShaderSource("charge.frag");
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
@@ -173,15 +173,15 @@ void prepareChargeProgram() {
     free((void*)fragmentSource);
 
     GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, quad.vertexShader);
+    glAttachShader(shaderProgram, quad->vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
-    chargeProgram = shaderProgram;
 
     glDeleteShader(fragmentShader);
+    return shaderProgram;
 }
 
-void drawCharges() {
+void drawCharges(GLuint chargeProgram) {
     glUseProgram(chargeProgram);
     GLuint unfiromLocation = glGetUniformLocation(chargeProgram, "transformation");
     for (size_t i = 0; i < charges.count; i++) {
@@ -206,25 +206,24 @@ int main(void)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    prepareQuad();
-    prepareFieldProgram();
-    prepareChargeProgram();
+    Quad quad = prepareQuad();
+    GLuint fieldProgram = prepareFieldProgram(&quad);
+    GLuint chargeProgram = prepareChargeProgram(&quad);
 
     while (!glfwWindowShouldClose(window))
     {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        drawPotentialField();
-        drawCharges();
+        drawPotentialField(fieldProgram);
+        drawCharges(chargeProgram);
 
         glfwSwapBuffers(window);
         glfwWaitEvents();
     }
 
-    glDeleteShader(quad.vertexShader);
+    deleteQuad(&quad);
     glDeleteProgram(fieldProgram);
-    glDeleteBuffers(1, &quad.vbo);
-    glDeleteBuffers(1, &quad.ibo);
+    glDeleteProgram(chargeProgram);
 
     glfwTerminate();
     return 0;
