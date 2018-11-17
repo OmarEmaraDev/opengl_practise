@@ -15,6 +15,7 @@ GLchar* readShaderSource(char* path);
 typedef struct {
     unsigned int count;
     GLfloat positions[MAXCOUNT * 2];
+    GLfloat values[MAXCOUNT];
 } Charges;
 Charges charges = {.count = 0};
 
@@ -22,6 +23,11 @@ typedef struct {
     double x;
     double y;
 } Point;
+
+typedef struct {
+    GLuint vbo;
+    GLuint ibo;
+} Quad;
 
 typedef struct {
     char selected;
@@ -72,6 +78,7 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
         if (!cursor.isAroundCharge) {
             charges.positions[charges.count * 2] = cursor.location.x;
             charges.positions[charges.count * 2 + 1] = cursor.location.y;
+            charges.values[charges.count] = mods != GLFW_MOD_CONTROL ? 1 : -1;
             charges.count++;
         } else {
             selection.selected = 1;
@@ -98,13 +105,43 @@ static void cursorPositionCallback(GLFWwindow* window, double xPos, double yPos)
     }
 }
 
-typedef struct {
-    GLuint vbo;
-    GLuint ibo;
-    GLuint vertexShader;
-} Quad;
+GLuint getProgram(char* vertexShaderName, char* fragmentShaderName) {
+    const GLchar* vertexSource = readShaderSource(vertexShaderName);
+    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &vertexSource, NULL);
+    glCompileShader(vertexShader);
 
-Quad prepareQuad() {
+    const GLchar* fragmentSource = readShaderSource(fragmentShaderName);
+    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
+    glCompileShader(fragmentShader);
+
+    GLuint shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, fragmentShader);
+    glLinkProgram(shaderProgram);
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    free((void*)vertexSource);
+    free((void*)fragmentSource);
+    return shaderProgram;
+}
+
+GLuint getQuadVAO(GLuint shaderProgram, Quad* quad) {
+    GLuint vao;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+    GLuint attr = glGetAttribLocation(shaderProgram, "position");
+    glEnableVertexAttribArray(attr);
+    glVertexAttribPointer(attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quad->ibo);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    return vao;
+}
+
+Quad loadQuad() {
     Quad quad;
     glGenBuffers(1, &quad.vbo);
     GLfloat vertices[] = {
@@ -124,70 +161,31 @@ Quad prepareQuad() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quad.ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    const GLchar* vertexSource = readShaderSource("vertex_shader.vert");
-    quad.vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(quad.vertexShader, 1, &vertexSource, NULL);
-    glCompileShader(quad.vertexShader);
-    free((void*)vertexSource);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
     return quad;
 }
 
-void deleteQuad(Quad* quad) {
-    glDeleteBuffers(1, &quad->vbo);
-    glDeleteBuffers(1, &quad->ibo);
-    glDeleteShader(quad->vertexShader);
-}
-
-GLuint prepareFieldProgram(Quad* quad) {
-    const GLchar* fragmentSource = readShaderSource("potential_field.frag");
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
-    glCompileShader(fragmentShader);
-    free((void*)fragmentSource);
-
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, quad->vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glDeleteShader(fragmentShader);
-    return shaderProgram;
-}
-
-void drawPotentialField(GLuint fieldProgram) {
-    glUseProgram(fieldProgram);
-    glUniform4f(glGetUniformLocation(fieldProgram, "transformation"), 1, 1, 0, 0);
-    glUniform2fv(glGetUniformLocation(fieldProgram, "charges"), charges.count, charges.positions);
-    glUniform1i(glGetUniformLocation(fieldProgram, "chargeCount"), charges.count);
+void drawPotentialField(Charges* charges, GLuint program, GLuint vao) {
+    glUseProgram(program);
+    glBindVertexArray(vao);
+    glUniform4f(glGetUniformLocation(program, "transformation"), 1, 1, 0, 0);
+    glUniform2fv(glGetUniformLocation(program, "positions"), charges->count, charges->positions);
+    glUniform1fv(glGetUniformLocation(program, "values"), charges->count, charges->values);
+    glUniform1i(glGetUniformLocation(program, "chargeCount"), charges->count);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
 }
 
-GLuint prepareChargeProgram(Quad* quad) {
-    const GLchar* fragmentSource = readShaderSource("charge.frag");
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
-    glCompileShader(fragmentShader);
-    free((void*)fragmentSource);
-
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, quad->vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glDeleteShader(fragmentShader);
-    return shaderProgram;
-}
-
-void drawCharges(GLuint chargeProgram) {
-    glUseProgram(chargeProgram);
-    GLuint unfiromLocation = glGetUniformLocation(chargeProgram, "transformation");
-    for (size_t i = 0; i < charges.count; i++) {
-        glUniform4f(unfiromLocation, RADIUS, RADIUS, charges.positions[i * 2], charges.positions[i * 2 + 1]);
+void drawCharges(Charges* charges, GLuint program, GLuint vao) {
+    glUseProgram(program);
+    glBindVertexArray(vao);
+    GLuint transformationLocation = glGetUniformLocation(program, "transformation");
+    GLuint isNegativeLocation = glGetUniformLocation(program, "isNegative");
+    for (size_t i = 0; i < charges->count; i++) {
+        glUniform1i(isNegativeLocation, charges->values[i] < 0);
+        glUniform4f(transformationLocation, RADIUS, RADIUS, charges->positions[i * 2], charges->positions[i * 2 + 1]);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     }
+    glBindVertexArray(0);
 }
 
 int main(void)
@@ -206,24 +204,22 @@ int main(void)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    Quad quad = prepareQuad();
-    GLuint fieldProgram = prepareFieldProgram(&quad);
-    GLuint chargeProgram = prepareChargeProgram(&quad);
+    Quad quad = loadQuad();
+    GLuint fieldProgram = getProgram("vertex_shader.vert", "potential_field.frag");
+    GLuint chargeProgram = getProgram("vertex_shader.vert", "charge.frag");
+    GLuint fieldVAO = getQuadVAO(fieldProgram, &quad);
+    GLuint chargeVAO = getQuadVAO(chargeProgram, &quad);
 
     while (!glfwWindowShouldClose(window))
     {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        drawPotentialField(fieldProgram);
-        drawCharges(chargeProgram);
+        drawPotentialField(&charges, fieldProgram, fieldVAO);
+        drawCharges(&charges, chargeProgram, chargeVAO);
 
         glfwSwapBuffers(window);
         glfwWaitEvents();
     }
-
-    deleteQuad(&quad);
-    glDeleteProgram(fieldProgram);
-    glDeleteProgram(chargeProgram);
 
     glfwTerminate();
     return 0;
